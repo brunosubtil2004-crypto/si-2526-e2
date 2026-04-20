@@ -31,6 +31,9 @@ public class mySaudeServer {
         System.setProperty("javax.net.ssl.keyStore", "keystore.server");
         System.setProperty("javax.net.ssl.keyStorePassword", "123456");
 
+        System.setProperty("javax.net.ssl.trustStore", "truststore.server");
+        System.setProperty("javax.net.ssl.trustStorePassword", "123456");
+
         ServerSocketFactory ssf = SSLServerSocketFactory.getDefault();
 
         // Criamos o socket do servidor para aceitar ligações

@@ -1,3 +1,5 @@
+import javax.net.SocketFactory;
+import javax.net.ssl.SSLSocketFactory;
 import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
@@ -7,6 +9,8 @@ import java.util.List;
 
 public class mySaude {
     public static void main(String[] args) {
+        System.setProperty("javax.net.ssl.trustStore", "truststore.cliente");
+        System.setProperty("javax.net.ssl.trustStorePassword", "123456");
         String serverAddress = "";
         int serverPort = 0;
         String username = "";
@@ -137,9 +141,10 @@ public class mySaude {
 
     private static void executaRemotamente(String host, int port, String op, String user, String pass, String target, List<String> files) throws Exception {
         System.out.println("A tentar ligar a " + host + ":" + port + "...");
-        try (Socket socket = new Socket(host, port);
-             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-             ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+        SocketFactory sf = SSLSocketFactory.getDefault( );
+        try (Socket s = sf.createSocket(host,port);
+             ObjectOutputStream out = new ObjectOutputStream(s.getOutputStream());
+             ObjectInputStream in = new ObjectInputStream(s.getInputStream())) {
 
             String serverOp = (op.equals("-e") || op.contains("e")) ? "ENVIAR" : "RECEBER";
             String destination = (serverOp.equals("ENVIAR")) ? target : user;
