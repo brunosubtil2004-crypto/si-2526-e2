@@ -13,6 +13,10 @@ import java.net.Socket;
 
 public class mySaudeServer {
     public static void main(String[] args) {
+
+        System.setProperty("javax.net.ssl.keyStore", "keystore.server");
+        System.setProperty("javax.net.ssl.keyStorePassword", "123456");
+
         if (args.length < 1) {
             System.out.println("Erro: Indicar o porto.");
             System.out.println("Uso: java mySaudeServer <porto>");
@@ -26,13 +30,6 @@ public class mySaudeServer {
             System.out.println("Erro: O porto '" + args[0] + "' não é um número válido.");
             return;
         }
-
-
-        System.setProperty("javax.net.ssl.keyStore", "keystore.server");
-        System.setProperty("javax.net.ssl.keyStorePassword", "123456");
-
-        System.setProperty("javax.net.ssl.trustStore", "truststore.server");
-        System.setProperty("javax.net.ssl.trustStorePassword", "123456");
 
         ServerSocketFactory ssf = SSLServerSocketFactory.getDefault();
 
