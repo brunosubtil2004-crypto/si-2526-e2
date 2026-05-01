@@ -1,6 +1,13 @@
 import java.io.*;
 import java.net.Socket;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.KeyStore;
+import java.security.MessageDigest;
+import java.security.cert.Certificate;
 import java.util.Arrays;
+import java.util.Base64;
+import java.util.List;
 
 /**
  * Grupo - si014
@@ -11,10 +18,19 @@ import java.util.Arrays;
 
 public class ServerThread extends Thread {
     private Socket socket;
+    private String macPass;
+    private String userAtual;
+    private String userFuncao;
+    private static final String USERS_FILE = "users";
+    private static final String MAC_FILE = "mySaude.mac";
+    private static final String KEYSTORE_USERS = "keystore.users";
+    private static final String KS_PASS = "123456";
 
-    public ServerThread(Socket inSoc) {
+    public ServerThread(Socket inSoc, String macPass) {
         this.socket = inSoc;
+        this.macPass = macPass;
     }
+
 
     @Override
     public void run() {
@@ -22,17 +38,37 @@ public class ServerThread extends Thread {
                 ObjectOutputStream outStream = new ObjectOutputStream(socket.getOutputStream());
                 ObjectInputStream inStream = new ObjectInputStream(socket.getInputStream())
         ) {
+            // AUTENTICAÇÃO
+            String user = (String) inStream.readObject();
+            String pass = (String) inStream.readObject();
+
+            if (!autenticar(user, pass, this.macPass)) {
+                outStream.writeObject("AUTH_FAIL");
+                return;
+            }
+            outStream.writeObject("AUTH_OK");
+
+            // RECEBER OPERAÇÃO
             String op = (String) inStream.readObject();
-            String targetUser = (String) inStream.readObject(); // username do destinatário
 
-            String clientAddr = socket.getInetAddress().getHostAddress();
-            System.out.println("\nPedido recebido de: " + clientAddr);
-            System.out.println("Operação: " + op + " | Utilizador Alvo: " + targetUser);
+            // CERTIFICADOS
+            // Se o cliente pedir um certificado que não tem localmente
+            if (op.equals("GET_CERT")) {
+                String target = (String) inStream.readObject();
+                enviarCertificado(target, outStream);
+                return;
+            }
 
-            // A diretoria do utilizador deve estar na mesma pasta do server
+            // CONTROLO DE ACESSO
+            // Apenas médicos podem enviar ficheiros para o servidor
+            if (op.equals("ENVIAR") && !this.userFuncao.equals("medico")) {
+                outStream.writeObject("ERRO_PERMISSAO");
+                return;
+            }
+
+            String targetUser = (String) inStream.readObject();
             File userDir = new File(targetUser);
 
-            // Se a diretoria do utilizador não existe no servidor, dá erro
             if (!userDir.exists() || !userDir.isDirectory()) {
                 outStream.writeObject("DIR_NAO_EXISTE");
                 return;
@@ -51,6 +87,7 @@ public class ServerThread extends Thread {
             try { socket.close(); } catch (IOException e) {}
         }
     }
+
 
   private void Upload(ObjectInputStream in, ObjectOutputStream out, File userDir) throws Exception {
 		int numFiles = in.readInt();
@@ -120,6 +157,61 @@ public class ServerThread extends Thread {
 		}
 		return false;
 	}
+
+
+
+
+
+    // Novas cenas
+
+    private void enviarCertificado(String alias, ObjectOutputStream out) throws Exception {
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        File ksFile = new File(KEYSTORE_USERS);
+
+        if (!ksFile.exists()) {
+            out.writeObject("KS_NOT_FOUND");
+            return;
+        }
+
+        try (FileInputStream fis = new FileInputStream(ksFile)) {
+            ks.load(fis, KS_PASS.toCharArray());
+        }
+
+        Certificate cert = ks.getCertificate(alias);
+        if (cert == null) {
+            out.writeObject("CERT_NOT_FOUND");
+        } else {
+            out.writeObject("OK");
+            out.writeObject(cert.getEncoded()); // Envia os bytes do certificado
+        }
+        out.flush();
+    }
+
+
+    // Validar autenticacao
+    private boolean autenticar(String user, String pass, String macPass) throws Exception {
+        metodosPartilhados.validarIntegridade(macPass);
+
+        // Verificar password
+        if (!Files.exists(Paths.get(USERS_FILE))) return false;
+
+        List<String> linhas = Files.readAllLines(Paths.get(USERS_FILE));
+        for (String linha : linhas) {
+            String[] p = linha.split(":");
+            if (p[0].equals(user)) {
+                byte[] salt = Base64.getDecoder().decode(p[2]);
+                String hashCalculado = metodosPartilhados.calcularHash(pass, salt);
+
+                if (hashCalculado.equals(p[3])) {
+                    this.userAtual = user;
+                    this.userFuncao = p[1];
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
 
 
 }

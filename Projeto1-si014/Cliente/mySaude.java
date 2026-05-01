@@ -4,6 +4,8 @@ import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -82,6 +84,15 @@ public class mySaude {
 			return;
 		}
 
+        if (operation.contains("c") && !targetUser.isEmpty()) {
+            try {
+                garantirCertificado(username, password, targetUser, serverAddress, serverPort);
+            } catch (Exception e) {
+                System.err.println("Aviso: Falha ao obter certificado do servidor: " + e.getMessage());
+                // Se falhar
+            }
+        }
+
         try {
             // filtrar
             // Enviar, Cifrar ou Assinar (precisam de ficheiros)
@@ -139,13 +150,30 @@ public class mySaude {
         }
     }
 
+
+
+
+
     private static void executaRemotamente(String host, int port, String op, String user, String pass, String target, List<String> files) throws Exception {
         System.out.println("A tentar ligar a " + host + ":" + port + "...");
-        SocketFactory sf = SSLSocketFactory.getDefault( );
-        try (Socket s = sf.createSocket(host,port);
+        SocketFactory sf = SSLSocketFactory.getDefault();
+        try (Socket s = sf.createSocket(host, port);
              ObjectOutputStream out = new ObjectOutputStream(s.getOutputStream());
              ObjectInputStream in = new ObjectInputStream(s.getInputStream())) {
 
+            // ENVIAR CREDENCIAIS
+            out.writeObject(user);
+            out.writeObject(pass);
+            out.flush();
+
+            // VERIFICAR AUTENTICAÇÃO
+            String authRes = (String) in.readObject();
+            if (!"AUTH_OK".equals(authRes)) {
+                System.err.println("Erro: Autenticação falhou no servidor.");
+                return;
+            }
+
+            // ENVIAR OPERAÇÃO E ALVO
             String serverOp = (op.equals("-e") || op.contains("e")) ? "ENVIAR" : "RECEBER";
             String destination = (serverOp.equals("ENVIAR")) ? target : user;
 
@@ -153,14 +181,22 @@ public class mySaude {
             out.writeObject(destination);
             out.flush();
 
+            // VERIFICAR RESPOSTAS DE ERRO (Diretoria ou Permissão)
             String response = (String) in.readObject();
+            if ("ERRO_PERMISSAO".equals(response)) {
+                System.err.println("Erro: Apenas médicos podem enviar ficheiros para o servidor.");
+                return;
+            }
             if ("DIR_NAO_EXISTE".equals(response)) {
-                System.out.println("Erro: Diretoria '" + destination + "' não existe no servidor.");
+                System.err.println("Erro: Diretoria '" + destination + "' não existe no servidor.");
                 return;
             }
 
-            if (serverOp.equals("ENVIAR")) upload(out, in, files);
-            else download(out, in, files);
+            // AVANCAR SE "READY"
+            if ("READY".equals(response)) {
+                if (serverOp.equals("ENVIAR")) upload(out, in, files);
+                else download(out, in, files);
+            }
         }
     }
 
@@ -292,4 +328,85 @@ public class mySaude {
         }
         return listaFinal;
     }
+
+
+
+    // Meti aqui as cenas novas
+
+    private static void garantirCertificado(String user, String pass, String target, String host, int port) throws Exception {
+        // Verifica keystore (user) se já tem o (target)
+        if (existeCertificadoLocal(user, pass, target)) return;
+
+        System.out.println("Certificado de '" + target + "' não encontrado em keystore." + user + ". A pedir ao servidor...");
+
+        SocketFactory sf = SSLSocketFactory.getDefault();
+        try (Socket s = sf.createSocket(host, port);
+             ObjectOutputStream out = new ObjectOutputStream(s.getOutputStream());
+             ObjectInputStream in = new ObjectInputStream(s.getInputStream())) {
+
+            // Enviar credenciais de quem pede
+            out.writeObject(user);
+            out.writeObject(pass);
+            out.flush();
+
+            if (!"AUTH_OK".equals(in.readObject())) throw new Exception("Falha na autenticação.");
+
+            // Pedir o certificado do alvo
+            out.writeObject("GET_CERT");
+            out.writeObject(target);
+            out.flush();
+
+            String res = (String) in.readObject();
+            if ("OK".equals(res)) {
+                byte[] certBytes = (byte[]) in.readObject();
+                // Guardar keystore (user) o certificado (target)
+                importarCertificado(user, pass, target, certBytes);
+                System.out.println("Certificado de '" + target + "' recebido e guardado.");
+            } else {
+                throw new Exception("Servidor não encontrou o certificado de: " + target);
+            }
+        }
+    }
+
+
+    // Verifica se o certificado de um utilizador já existe localmente
+    private static boolean existeCertificadoLocal(String alias, String password, String target) throws Exception {
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        File ksFile = new File("keystore." + alias);
+
+        if (!ksFile.exists()) return false;
+
+        try (FileInputStream fis = new FileInputStream(ksFile)) {
+            ks.load(fis, password.toCharArray());
+        }
+
+        return ks.containsAlias(target);
+    }
+
+
+    // Recebe os bytes do servidor, reconstrói o certificado e guarda-o na keystore local.
+    private static void importarCertificado(String alias, String password, String target, byte[] certBytes) throws Exception {
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        File ksFile = new File("keystore." + alias);
+
+        // Carrega a keystore que já contém a tua chave privada
+        try (FileInputStream fis = new FileInputStream(ksFile)) {
+            ks.load(fis, password.toCharArray());
+        }
+
+        // constrói o certificado a partir dos bytes
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        java.security.cert.Certificate cert = cf.generateCertificate(new ByteArrayInputStream(certBytes));
+
+        // Adiciona o certificado com o alias do destinatário
+        ks.setCertificateEntry(target, cert);
+
+        // Grava de volta no ficheiro pessoal
+        try (FileOutputStream fos = new FileOutputStream(ksFile)) {
+            ks.store(fos, password.toCharArray());
+        }
+    }
+
+
+
 }
