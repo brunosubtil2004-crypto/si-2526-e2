@@ -384,12 +384,12 @@ public class mySaude {
     }
 
 
-    // Recebe os bytes do servidor, reconstrói o certificado e guarda-o na keystore local.
+    // Recebe os bytes do servidor, reconstrói o certificado e guarda-o na keystore local
     private static void importarCertificado(String alias, String password, String target, byte[] certBytes) throws Exception {
         KeyStore ks = KeyStore.getInstance("PKCS12");
         File ksFile = new File("keystore." + alias);
 
-        // Carrega a keystore que já contém a tua chave privada
+        // Carrega a keystore que já contém a chave privada
         try (FileInputStream fis = new FileInputStream(ksFile)) {
             ks.load(fis, password.toCharArray());
         }
